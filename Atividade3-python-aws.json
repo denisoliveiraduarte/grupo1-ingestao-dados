@@ -1,0 +1,199 @@
+
+
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+
+sc = SparkContext.getOrCreate()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+import csv
+from datetime import datetime
+import os
+import re
+import unicodedata
+import duckdb as db
+import boto3
+s3 = boto3.client('s3')
+response = s3.list_buckets()
+
+# Output the bucket names
+print('Existing buckets:')
+for bucket in response['Buckets']:
+    print(f'  {bucket["Name"]}')
+
+
+s3r = boto3.resource("s3")
+s3_bucket = s3r.Bucket("denis-ingestao-bancos-grupo1")
+dir = "banco"
+files_bancos = [f.key.split(dir + "/")[1] for f in 
+s3_bucket.objects.filter(Prefix=dir).all()]
+print(files_bancos)
+dir = "empregados"
+files_empregados = [f.key.split(dir + "/")[1] for f in 
+s3_bucket.objects.filter(Prefix=dir).all()]
+print(files_empregados)
+dir = "reclamacoes"
+files_reclamacoes = [f.key.split(dir + "/")[1] for f in 
+s3_bucket.objects.filter(Prefix=dir).all()]
+print(files_reclamacoes)
+
+
+db.sql("INSTALL httpfs;")
+db.sql("LOAD httpfs;")
+
+
+
+bancos = db.sql("Create table bancos AS SELECT * FROM read_csv_auto('s3://denis-ingestao-bancos-grupo1/banco/bancos.tsv', header=True);")
+class DataFrame:
+    def __init__(self, data, columns=None):
+        self.data = data
+        self.columns = columns
+    
+    def __repr__(self):
+        return str(self.data)
+
+    def rename_column(self, old_name, new_name):
+        if old_name in self.columns:
+            column_index = self.columns.index(old_name)
+            self.columns[column_index] = new_name
+
+    def apply_function(self, column_name, func):
+        column_index = self.columns.index(column_name)
+        for row in self.data:
+            row[column_index] = func(row[column_index])
+
+    def to_csv(self, output_file, delimiter=";"):
+        with open(output_file, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile, delimiter=delimiter)
+            writer.writerow(self.columns)
+            for row in self.data:
+                writer.writerow(row)
+def get_df(bname, fname, delimiter, header, charset):
+ 
+    
+    obj = s3.get_object(Bucket=bname, Key=fname) 
+    data = obj['Body'].read().decode(charset).splitlines()
+    reader = csv.reader(data, delimiter=delimiter)
+
+    if header:
+            header_row = next(reader)
+            
+    data_rows = [row for row in reader]
+    
+    
+    if header:
+        df = DataFrame(data_rows, columns=header_row)
+    else:
+        df = DataFrame(data_rows)
+   
+    
+    return df
+def remove_accented_characters(text):
+    nfkd_form = unicodedata.normalize('NFKD', text)
+    return ''.join([c for c in nfkd_form if not unicodedata.combining(c)])
+fname_bancos =  'banco/' + files_bancos[1]
+bname = 'denis-ingestao-bancos-grupo1'
+delimiter = '\t'
+header = True
+charset = 'utf-8'
+
+column_to_rename_old = ['\ufeffSegmento','CNPJ','Nome']
+column_to_rename_new = ['segmento','cnpj','nome']
+
+column_to_clean = 'nome'
+
+# Load df
+df_bancos = get_df(bname, fname_bancos, delimiter, header, charset)
+
+# Apply column rename func
+for i in range(len(column_to_rename_old)):
+    df_bancos.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+
+# Apply remove accent char func 
+df_bancos.apply_function(column_to_clean, remove_accented_characters)
+
+
+fname_empregados_01 = 'empregados/' + files_empregados[1]
+fname_empregados_02 = 'empregados/' + files_empregados[2]
+bname = 'denis-ingestao-bancos-grupo1'
+delimiter = '|'
+header = True
+charset = 'utf-8'
+
+column_to_rename_old = ['\ufeffemployer_name', 'reviews_count', 'culture_count', 'salaries_count', 'benefits_count', 'employer-website', 'employer-headquarters', 'employer-founded', 'employer-industry', 'employer-revenue', 'url', 'Geral', 'Cultura e valores', 'Diversidade e inclusÃ£o', 'Qualidade de vida', 'Alta lideranÃ§a', 'RemuneraÃ§Ã£o e benefÃ\xadcios', 'Oportunidades de carreira', 'Recomendam para outras pessoas(%)', 'Perspectiva positiva da empresa(%)', 'Segmento', 'Nome', 'match_percent']
+column_to_rename_new = ['employer_name', 'reviews_count', 'culture_count', 'salaries_count', 'benefits_count', 'employer_website', 'employer_headquarters', 'employer_founded', 'employer_industry', 'employer_revenue', 'url', 'geral', 'cultura_e_valores', 'diversidade_e_inclusao', 'qualidade_de_vida', 'alta_lideranca', 'remuneracao_e_beneficios', 'oportunidades_de_carreira', 'recomendam_para_outras_pessoas_perc', 'perspectiva_positiva_da_empresa_perc', 'segmento', 'nome', 'match_percent']
+
+column_to_clean = ['employer_name', 'nome']
+
+# Load dfs
+df_empregados_01 = get_df(bname, fname_empregados_01, delimiter, header, charset)
+df_empregados_02 = get_df(bname, fname_empregados_02, delimiter, header, charset)
+print(df_empregados_01)
+
+# Apply column rename func
+for i in range(len(column_to_rename_old)):
+    df_empregados_01.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+    df_empregados_02.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+
+# Apply remove accent char func
+for i in range(len(column_to_clean)):
+    df_empregados_01.apply_function(column_to_clean[i], remove_accented_characters)
+    df_empregados_02.apply_function(column_to_clean[i], remove_accented_characters)
+
+# df_empregados_02.columns
+bname = 'denis-ingestao-bancos-grupo1'
+path_raw_reclamacoes = 'reclamacoes/'
+
+fname_reclamacoes_202101 = path_raw_reclamacoes + files_reclamacoes[1]
+fname_reclamacoes_202102 = path_raw_reclamacoes + files_reclamacoes[2]
+fname_reclamacoes_202103 = path_raw_reclamacoes + files_reclamacoes[3]
+fname_reclamacoes_202104 = path_raw_reclamacoes + files_reclamacoes[4]
+fname_reclamacoes_202201 = path_raw_reclamacoes + files_reclamacoes[5]
+fname_reclamacoes_202203 = path_raw_reclamacoes + files_reclamacoes[6]
+fname_reclamacoes_202204 = path_raw_reclamacoes + files_reclamacoes[7]
+
+
+delimiter = ';'
+header = True
+charset = 'utf-8'
+
+column_to_rename_old = ['\ufeffAno', 'Trimestre', 'Categoria', 'Tipo', 'CNPJ IF', 'Instituição financeira', 'Índice', 'Quantidade de reclamações reguladas procedentes', 'Quantidade de reclamações reguladas - outras', 'Quantidade de reclamações não reguladas', 'Quantidade total de reclamações', 'Quantidade total de clientes – CCS e SCR', 'Quantidade de clientes – CCS', 'Quantidade de clientes – SCR', ',,']
+column_to_rename_new = ['ano', 'trimestre', 'categoria', 'tipo', 'cnpj_if', 'instituicao_financeira', 'indice', 'quantidade_de_reclamacoes_reguladas_procedentes', 'quantidade_de_reclamacoes_reguladas_outras', 'quantidade_de_reclamacoes_nao_reguladas', 'quantidade_total_de_reclamacoes', 'quantidade_total_de_clientes_ccs_e_scr', 'quantidade_de_clientes_ccs', 'quantidade_de_clientes_scr', ',,']
+
+column_to_clean = 'instituicao_financeira'
+
+# Load dfs
+df_reclamacoes_202101 = get_df(bname, fname_reclamacoes_202101, delimiter, header, charset)
+df_reclamacoes_202102 = get_df(bname, fname_reclamacoes_202102, delimiter, header, charset)
+df_reclamacoes_202103 = get_df(bname, fname_reclamacoes_202103, delimiter, header, charset)
+df_reclamacoes_202104 = get_df(bname, fname_reclamacoes_202104, delimiter, header, charset)
+df_reclamacoes_202201 = get_df(bname, fname_reclamacoes_202201, delimiter, header, charset)
+df_reclamacoes_202203 = get_df(bname, fname_reclamacoes_202203, delimiter, header, charset)
+df_reclamacoes_202204 = get_df(bname, fname_reclamacoes_202204, delimiter, header, charset)
+
+
+# Apply column rename func
+for i in range(len(column_to_rename_old)):
+    df_reclamacoes_202101.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+    df_reclamacoes_202102.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+    df_reclamacoes_202103.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+    df_reclamacoes_202104.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+    df_reclamacoes_202201.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+    df_reclamacoes_202203.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+    df_reclamacoes_202204.rename_column(column_to_rename_old[i], column_to_rename_new[i])
+
+# Apply remove accent char func
+df_reclamacoes_202101.apply_function(column_to_clean, remove_accented_characters)
+df_reclamacoes_202102.apply_function(column_to_clean, remove_accented_characters)
+df_reclamacoes_202103.apply_function(column_to_clean, remove_accented_characters)
+df_reclamacoes_202104.apply_function(column_to_clean, remove_accented_characters)
+df_reclamacoes_202201.apply_function(column_to_clean, remove_accented_characters)
+df_reclamacoes_202203.apply_function(column_to_clean, remove_accented_characters)
+df_reclamacoes_202204.apply_function(column_to_clean, remove_accented_characters)
+job.commit()
