@@ -1,5 +1,5 @@
 {
-  "Comment": "Atividade 5 - Orquestração e Qualidade",
+  "Comment": "Atividade 6 - Orquestração e Qualidade",
   "StartAt": "Inicio",
   "States": {
     "Inicio": {
