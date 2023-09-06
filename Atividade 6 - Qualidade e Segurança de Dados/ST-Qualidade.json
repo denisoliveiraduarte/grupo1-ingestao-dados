@@ -1,0 +1,43 @@
+{
+  "Comment": "Atividade 5 - Orquestração e Qualidade",
+  "StartAt": "Inicio",
+  "States": {
+    "Inicio": {
+      "Type": "Pass",
+      "Result": "Início",
+      "Next": "Glue TransferirArquivosParaRaw"
+    },
+    "Glue TransferirArquivosParaRaw": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "1-TransferirArquivosParaRaw"
+      },
+      "Next": "Glue TransformacaoParaTrusted"
+    },
+    "Glue TransformacaoParaTrusted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "2-TransformacaoParaTrusted"
+      },
+      "Next": "Glue JuncaoParaDelivery"
+    },
+    "Glue JuncaoParaDelivery": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "3-JuncaoParaDelivery"
+      },
+     "Next": "Glue GravarDeliveryParaDB"
+    },
+    "Glue GravarDeliveryParaDB": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "4-GravarDeliveryParaDB"
+      },
+      "End": true
+    }
+  }
+}
