@@ -1,0 +1,53 @@
+import json
+import boto3
+
+from pyspark.sql import SparkSession
+
+s3 = boto3.resource('s3')
+def lambda_handler(event, context):
+    aws_region = os.environ['AWS_REGION']
+    aws_access_key_id = os.environ['AWS_ACCESS_KEY_ID']
+    aws_secret_access_key = os.environ['AWS_SECRET_ACCESS_KEY']
+    session_token = os.environ['AWS_SESSION_TOKEN']
+    
+    spark = SparkSession.builder \
+    .appName("Spark-on-AWS-Lambda") \
+    .master("local[*]") \
+    .config("spark.driver.bindAddress", "127.0.0.1") \
+    .config("spark.driver.memory", "5g") \
+    .config("spark.executor.memory", "5g") \
+    .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+    .config("spark.sql.hive.convertMetastoreParquet", "false") \
+    .config("spark.hadoop.hive.metastore.client.factory.class", "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory") \
+    .config("hoodie.meta.sync.client.tool.class", "org.apache.hudi.aws.sync.AwsGlueCatalogSyncTool") \
+    .config("spark.hadoop.fs.s3a.access.key", aws_access_key_id) \
+    .config("spark.hadoop.fs.s3a.secret.key", aws_secret_access_key) \
+    .config("spark.hadoop.fs.s3a.session.token",session_token) \
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider","org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider") \
+    .enableHiveSupport().getOrCreate()
+    
+    bucketNameRaw = "ingestao-bigdata-raw"
+    
+    for record in event['Records']:
+        key = record['s3']['object']['key']
+        size = record['s3']['object']['size']
+        bucket = record['s3']['bucket']['name']
+
+        #Copia para raw
+        copy_source = {
+            'Bucket': bucket,
+            'Key': key
+        }
+        s3.meta.client.copy(copy_source, bucketNameRaw, key)
+        
+        #Abrir arquivo
+        delimitador = "|"
+        if "reclamacoes" in key:
+            delimitador = ";"
+        df = spark.read.option("delimiter", delimitador).option("header", True).csv('s3://'+bucketNameRaw+key)
+        
+        #Enviar cada linha para MQ
+    
+    return {
+            'statusCode': 200
+            }
