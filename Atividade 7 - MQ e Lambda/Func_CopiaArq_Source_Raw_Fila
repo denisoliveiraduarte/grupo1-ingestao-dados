@@ -1,30 +1,9 @@
 import json
 import boto3
-
-from pyspark.sql import SparkSession
+import csv
 
 s3 = boto3.resource('s3')
 def lambda_handler(event, context):
-    aws_region = os.environ['AWS_REGION']
-    aws_access_key_id = os.environ['AWS_ACCESS_KEY_ID']
-    aws_secret_access_key = os.environ['AWS_SECRET_ACCESS_KEY']
-    session_token = os.environ['AWS_SESSION_TOKEN']
-    
-    spark = SparkSession.builder \
-    .appName("Spark-on-AWS-Lambda") \
-    .master("local[*]") \
-    .config("spark.driver.bindAddress", "127.0.0.1") \
-    .config("spark.driver.memory", "5g") \
-    .config("spark.executor.memory", "5g") \
-    .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
-    .config("spark.sql.hive.convertMetastoreParquet", "false") \
-    .config("spark.hadoop.hive.metastore.client.factory.class", "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory") \
-    .config("hoodie.meta.sync.client.tool.class", "org.apache.hudi.aws.sync.AwsGlueCatalogSyncTool") \
-    .config("spark.hadoop.fs.s3a.access.key", aws_access_key_id) \
-    .config("spark.hadoop.fs.s3a.secret.key", aws_secret_access_key) \
-    .config("spark.hadoop.fs.s3a.session.token",session_token) \
-    .config("spark.hadoop.fs.s3a.aws.credentials.provider","org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider") \
-    .enableHiveSupport().getOrCreate()
     
     bucketNameRaw = "ingestao-bigdata-raw"
     
@@ -42,12 +21,37 @@ def lambda_handler(event, context):
         
         #Abrir arquivo
         delimitador = "|"
+        tipo = "empregados"
+    
+        client = boto3.client('s3')
+
+        obj = client.get_object(Bucket=bucketNameRaw, Key=key)
+        generator = obj['Body'].iter_lines()
+    
+        colunas = ['Remuneracao e beneficios', 'Geral',  'Nome']
+        
         if "reclamacoes" in key:
             delimitador = ";"
-        df = spark.read.option("delimiter", delimitador).option("header", True).csv('s3://'+bucketNameRaw+key)
+            tipo = "reclamacoes"   
+            colunas = ['Ano', 'Trimestre', 'Instituicao financeira', 'Indice', 'Quantidade total de reclamacoes', 'Quantidade total de clientes - CCS e SCR']
+            
+        # lista de colunas
+        headers = next(generator).decode('utf-8').split(delimitador)
         
-        #Enviar cada linha para MQ
-    
+        sqs = boto3.client('sqs')
+
+        # obter valores de linhas
+        for line in generator:
+            linha = '{"tipo":"'+tipo+'"}'
+            j_linha = json.loads(linha)
+            row = line.decode('utf-8').split(delimitador)
+            for idx, value in enumerate(row):
+                for r in range(len(colunas)): 
+                    if headers[idx] == colunas[r]:
+                        valor = {colunas[r]:value}
+                        j_linha.update(valor)
+            sqs.send_message(QueueUrl='https://sqs.us-east-1.amazonaws.com/079085224070/FilaBancos', MessageBody=json.dumps(j_linha))        
+       
     return {
             'statusCode': 200
             }

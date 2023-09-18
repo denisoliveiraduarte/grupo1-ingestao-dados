@@ -1,0 +1,73 @@
+
+import json
+import pyodbc
+import boto3
+
+def get_secret():
+
+    secret_name = "chave_db_bancos"
+    region_name = "us-east-1"
+
+    # Create a Secrets Manager client
+    session = boto3.session.Session()
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
+
+    try:
+        get_secret_value_response = client.get_secret_value(
+            SecretId=secret_name
+        )
+    except ClientError as e:
+        raise e
+
+    # Decrypts secret using the associated KMS key.
+    return get_secret_value_response['SecretString']
+
+
+
+def lambda_handler(event, context):
+    secret = get_secret()
+    secret = json.loads(secret)
+    
+     # rds settings
+    user_name = secret.get("username")
+    password = secret.get("password")
+    host = secret.get("host")
+    port = secret.get("port")
+    db_name = "bancos"
+    driver = '{ODBC Driver 17 for SQL Server}'
+
+    conn = pyodbc.connect(f"DRIVER={driver};SERVER={host};PORT={port};DATABASE={db_name};UID={user_name};PWD={password}");
+    
+    print('Conectado db')
+    
+    for record in event['Records']:
+        data = json.loads(record["body"])
+   
+        #Verificar tipo de arquivo
+        if data.get("tipo") == "empregados":
+            #Tratamento de dados
+            
+            #Gravação em banco de dados
+            Nome = data['Nome']
+            Geral = data['Geral']
+            Remuneracao_beneficios = data['Remuneracao e beneficios']
+        
+            sql_string = f"insert into dbo.Empregados (Nome, Geral, Remuneracao_beneficios) values('{Nome}', {Geral}, {Remuneracao_beneficios})"
+        
+            with conn.cursor() as cur:
+                cur.execute("IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados') create table dbo.Empregados ( Nome VARCHAR(1000) NOT NULL, Geral DECIMAL(10,1) NULL, Remuneracao_beneficios DECIMAL(10,1) NULL)")
+                cur.execute(sql_string)
+                conn.commit()
+                
+            conn.commit()
+    
+    conn.close()
+    
+    print('Desconectado db')
+        
+    return {
+            'statusCode': 200
+        }
