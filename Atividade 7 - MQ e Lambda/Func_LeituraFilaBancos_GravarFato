@@ -2,6 +2,7 @@
 import json
 import pyodbc
 import boto3
+import re
 
 def get_secret():
 
@@ -48,22 +49,80 @@ def lambda_handler(event, context):
    
         #Verificar tipo de arquivo
         if data.get("tipo") == "empregados":
-            #Tratamento de dados
-            
+            #Obtenção de campos
+            nome = data['Nome']
+            geral = data['Geral']
+            remuneracaoBeneficios = data['Remuneracao e beneficios']
+
             #Gravação em banco de dados
-            Nome = data['Nome']
-            Geral = data['Geral']
-            Remuneracao_beneficios = data['Remuneracao e beneficios']
-        
-            sql_string = f"insert into dbo.Empregados (Nome, Geral, Remuneracao_beneficios) values('{Nome}', {Geral}, {Remuneracao_beneficios})"
+            sql_string = f"INSERT INTO dbo.Empregados (Nome, Geral, Remuneracao_beneficios) \
+                VALUES ('{nome}', {geral}, {remuneracaoBeneficios})"
         
             with conn.cursor() as cur:
-                cur.execute("IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados') create table dbo.Empregados ( Nome VARCHAR(1000) NOT NULL, Geral DECIMAL(10,1) NULL, Remuneracao_beneficios DECIMAL(10,1) NULL)")
+                cur.execute("IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados') \
+                                CREATE TABLE dbo.Empregados ( \
+                                Nome VARCHAR(1000) NOT NULL, \
+                                Geral DECIMAL(10,1) NULL, \
+                                RemuneracaoBeneficios DECIMAL(10,1) NULL)")
                 cur.execute(sql_string)
                 conn.commit()
-                
+        else:
+           
+            #Obtenção de campos
+            ano = data['Ano']
+            trimestre = data['Trimestre']
+            instituicaoFinanceira = data['Instituicao financeira']
+            indice = data['Indice']
+            quantidadeReclamacoes = data['Quantidade total de reclamacoes']
+            quantidadeClientes = data['Quantidade total de clientes - CCS e SCR']
+
+             #Tratamento de dados
+            trimestre = re.sub(r'o', '', trimestre)
+            instituicaoFinanceira = re.sub(r'conglomerado', '', instituicaoFinanceira)
+            instituicaoFinanceira = re.sub(r'[()]', '', instituicaoFinanceira)
+            instituicaoFinanceira = instituicaoFinanceira.strip()
+            indice = re.sub(r',', '.', indice)
+            
+            #Gravação em banco de dados
+            sql_string = f"INSERT INTO dbo.Reclamacoes (Nome, Ano, Trimestre, Indice, QuantidadeReclamacoes, QuantidadeClientes) \
+                VALUES ('{instituicaoFinanceira}', {ano}, {trimestre}, {indice}, {quantidadeReclamacoes}, {quantidadeClientes})"
+        
+            with conn.cursor() as cur:
+                cur.execute("IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Reclamacoes') \
+                                CREATE TABLE dbo.Reclamacoes ( \
+                                Nome VARCHAR(1000) NOT NULL, \
+                                Ano INT NOT NULL, \
+                                Trimestre INT NOT NULL, \
+                                Indice DECIMAL(10,2) NULL, \
+                                QuantidadeReclamacoes INT NULL, \
+                                QuantidadeClientes INT NULL)")
+                cur.execute(sql_string)
+                conn.commit()
+
+        #Verificar se as tabelas base foram criadas e cria a tabela fato
+        with conn.cursor() as cur:
+            cur.execute("IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Reclamacoes') \
+                            IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados') \
+                                IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Fato_Bancos') \
+                                    CREATE TABLE dbo.Fato_Bancos ( \
+                                    Nome VARCHAR(1000) NOT NULL, \
+                                    CNPJ VARCHAR(50) NOT NULL \
+                                    Segmento VARCHAR(2) NOT NULL \
+                                    IndiceSatisfacaoGeral DECIMAL(10,1) NULL, \
+                                    IndiceSatisfacaoSalarios DECIMAL(10,1) NULL, \
+                                    IndiceReclamacoes DECIMAL(10,2) NULL, \
+                                    QuantidadeReclamacoes INT NULL, \
+                                    QuantidadeClientes INT NULL) \
+                                    INSERT INTO dbo.Fato_Bancos \
+                                    SELECT b.Nome, b.CNPJ, b.Segmento, \
+                                    AVG(Geral), AVG(RemuneracaoBeneficios) \
+                                    AVG(Indice), SUM(QuantidadeReclamacoes) \
+                                    SUM(QuantidadeClientes) FROM Bancos b \
+                                    INNER JOIN Reclamacoes r ON r.Nome = b.Nome \
+                                    INNER JOIN Empregados e ON e.Nome = b.Nome \
+                                    GROUP BY b.Nome, b.CNPJ, b.Segmento \
+                                    ORDER BY b.Segmento, b.Nome")
             conn.commit()
-    
     conn.close()
     
     print('Desconectado db')
