@@ -1,0 +1,57 @@
+import json
+import boto3
+import csv
+
+s3 = boto3.resource('s3')
+def lambda_handler(event, context):
+    
+    bucketNameRaw = "ingestao-bigdata-raw"
+    
+    for record in event['Records']:
+        key = record['s3']['object']['key']
+        size = record['s3']['object']['size']
+        bucket = record['s3']['bucket']['name']
+
+        #Copia para raw
+        copy_source = {
+            'Bucket': bucket,
+            'Key': key
+        }
+        s3.meta.client.copy(copy_source, bucketNameRaw, key)
+        
+        #Abrir arquivo
+        delimitador = "|"
+        tipo = "empregados"
+    
+        client = boto3.client('s3')
+
+        obj = client.get_object(Bucket=bucketNameRaw, Key=key)
+        generator = obj['Body'].iter_lines()
+    
+        colunas = ['Remuneracao e beneficios', 'Geral',  'Nome']
+        
+        if "reclamacoes" in key:
+            delimitador = ";"
+            tipo = "reclamacoes"   
+            colunas = ['Ano', 'Trimestre', 'Instituicao financeira', 'Indice', 'Quantidade total de reclamacoes', 'Quantidade total de clientes - CCS e SCR']
+            
+        # lista de colunas
+        headers = next(generator).decode('utf-8').split(delimitador)
+        
+        sqs = boto3.client('sqs')
+
+        # obter valores de linhas
+        for line in generator:
+            linha = '{"tipo":"'+tipo+'"}'
+            j_linha = json.loads(linha)
+            row = line.decode('utf-8').split(delimitador)
+            for idx, value in enumerate(row):
+                for r in range(len(colunas)): 
+                    if headers[idx] == colunas[r]:
+                        valor = {colunas[r]:value}
+                        j_linha.update(valor)
+            sqs.send_message(QueueUrl='https://sqs.us-east-1.amazonaws.com/079085224070/FilaBancos', MessageBody=json.dumps(j_linha))        
+       
+    return {
+            'statusCode': 200
+            }
