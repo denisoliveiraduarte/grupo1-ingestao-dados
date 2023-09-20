@@ -103,6 +103,7 @@ def lambda_handler(event, context):
         with conn.cursor() as cur:
             cur.execute("IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Reclamacoes') \
                             IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados') \
+                                BEGIN \
                                 IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Fato_Bancos') \
                                     CREATE TABLE dbo.Fato_Bancos ( \
                                     Nome VARCHAR(1000) NOT NULL, \
@@ -113,15 +114,16 @@ def lambda_handler(event, context):
                                     IndiceReclamacoes DECIMAL(10,2) NULL, \
                                     QuantidadeReclamacoes INT NULL, \
                                     QuantidadeClientes INT NULL) \
-                                    INSERT INTO dbo.Fato_Bancos \
-                                    SELECT b.Nome, b.CNPJ, b.Segmento, \
-                                    AVG(Geral), AVG(RemuneracaoBeneficios) \
-                                    AVG(Indice), SUM(QuantidadeReclamacoes) \
-                                    SUM(QuantidadeClientes) FROM Bancos b \
-                                    INNER JOIN Reclamacoes r ON r.Nome = b.Nome \
-                                    INNER JOIN Empregados e ON e.Nome = b.Nome \
-                                    GROUP BY b.Nome, b.CNPJ, b.Segmento \
-                                    ORDER BY b.Segmento, b.Nome")
+                                INSERT INTO dbo.Fato_Bancos \
+                                SELECT b.Nome, b.CNPJ, b.Segmento, \
+                                AVG(Geral), AVG(RemuneracaoBeneficios) \
+                                AVG(Indice), SUM(QuantidadeReclamacoes) \
+                                SUM(QuantidadeClientes) FROM Bancos b \
+                                INNER JOIN Reclamacoes r ON r.Nome = b.Nome \
+                                INNER JOIN Empregados e ON e.Nome = b.Nome \
+                                GROUP BY b.Nome, b.CNPJ, b.Segmento \
+                                ORDER BY b.Segmento, b.Nome \
+                                END")
             conn.commit()
     conn.close()
     
