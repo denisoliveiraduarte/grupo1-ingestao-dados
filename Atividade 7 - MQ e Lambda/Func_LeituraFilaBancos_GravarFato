@@ -56,14 +56,14 @@ def lambda_handler(event, context):
 
             #Gravação em banco de dados
             sql_string = f"INSERT INTO dbo.Empregados (Nome, Geral, Remuneracao_beneficios) \
-                VALUES ('{nome}', {geral}, {remuneracaoBeneficios})"
+                VALUES ('{nome}', {geral}, {remuneracaoBeneficios});"
         
             with conn.cursor() as cur:
                 cur.execute("IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados') \
                                 CREATE TABLE dbo.Empregados ( \
                                 Nome VARCHAR(1000) NOT NULL, \
                                 Geral DECIMAL(10,1) NULL, \
-                                RemuneracaoBeneficios DECIMAL(10,1) NULL)")
+                                RemuneracaoBeneficios DECIMAL(10,1) NULL);")
                 cur.execute(sql_string)
                 conn.commit()
         else:
@@ -77,15 +77,25 @@ def lambda_handler(event, context):
             quantidadeClientes = data['Quantidade total de clientes - CCS e SCR']
 
              #Tratamento de dados
-            trimestre = re.sub(r'o', '', trimestre)
-            instituicaoFinanceira = re.sub(r'conglomerado', '', instituicaoFinanceira)
+            trimestre = re.sub('o', '', trimestre)
+            instituicaoFinanceira = re.sub('conglomerado', '', instituicaoFinanceira)
             instituicaoFinanceira = re.sub(r'[()]', '', instituicaoFinanceira)
             instituicaoFinanceira = instituicaoFinanceira.strip()
             indice = re.sub(r',', '.', indice)
+            indice = indice.strip()
+            quantidadeReclamacoes = quantidadeReclamacoes.strip()
+            quantidadeClientes = quantidadeClientes.strip()
+            
+            if indice == '':
+                indice = 'NULL'
             
             #Gravação em banco de dados
             sql_string = f"INSERT INTO dbo.Reclamacoes (Nome, Ano, Trimestre, Indice, QuantidadeReclamacoes, QuantidadeClientes) \
-                VALUES ('{instituicaoFinanceira}', {ano}, {trimestre}, {indice}, {quantidadeReclamacoes}, {quantidadeClientes})"
+                VALUES ('{instituicaoFinanceira}', {ano}, {trimestre}, {indice}, {quantidadeReclamacoes}, {quantidadeClientes});"
+        
+             #Gravação em banco de dados
+            sql_string = f"INSERT INTO dbo.Reclamacoes (Nome, Ano, Trimestre, Indice, QuantidadeReclamacoes, QuantidadeClientes) \
+                VALUES ('{instituicaoFinanceira}', {ano}, {trimestre}, {indice}, {quantidadeReclamacoes}, {quantidadeClientes});"
         
             with conn.cursor() as cur:
                 cur.execute("IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Reclamacoes') \
@@ -94,35 +104,36 @@ def lambda_handler(event, context):
                                 Ano INT NOT NULL, \
                                 Trimestre INT NOT NULL, \
                                 Indice DECIMAL(10,2) NULL, \
-                                QuantidadeReclamacoes INT NULL, \
-                                QuantidadeClientes INT NULL)")
+                                QuantidadeReclamacoes BIGINT NULL, \
+                                QuantidadeClientes BIGINT NULL);")
                 cur.execute(sql_string)
                 conn.commit()
 
         #Verificar se as tabelas base foram criadas e cria a tabela fato
         with conn.cursor() as cur:
-            cur.execute("IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Reclamacoes') \
-                            IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados') \
-                                BEGIN \
-                                IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Fato_Bancos') \
+            cur.execute("IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Reclamacoes')  \
+                            IF EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Empregados')  \
+                                BEGIN  \
+                                IF NOT EXISTS (SELECT 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Fato_Bancos')  \
                                     CREATE TABLE dbo.Fato_Bancos ( \
                                     Nome VARCHAR(1000) NOT NULL, \
-                                    CNPJ VARCHAR(50) NOT NULL \
-                                    Segmento VARCHAR(2) NOT NULL \
+                                    CNPJ VARCHAR(50) NOT NULL, \
+                                    Segmento VARCHAR(2) NOT NULL, \
                                     IndiceSatisfacaoGeral DECIMAL(10,1) NULL, \
                                     IndiceSatisfacaoSalarios DECIMAL(10,1) NULL, \
                                     IndiceReclamacoes DECIMAL(10,2) NULL, \
-                                    QuantidadeReclamacoes INT NULL, \
-                                    QuantidadeClientes INT NULL) \
+                                    QuantidadeReclamacoes BIGINT NULL, \
+                                    QuantidadeClientes BIGINT NULL); \
+                                DELETE FROM dbo.Fato_Bancos; \
                                 INSERT INTO dbo.Fato_Bancos \
                                 SELECT b.Nome, b.CNPJ, b.Segmento, \
-                                AVG(Geral), AVG(RemuneracaoBeneficios) \
-                                AVG(Indice), SUM(QuantidadeReclamacoes) \
+                                AVG(Geral), AVG(RemuneracaoBeneficios), \
+                                AVG(Indice), SUM(QuantidadeReclamacoes), \
                                 SUM(QuantidadeClientes) FROM Bancos b \
-                                INNER JOIN Reclamacoes r ON r.Nome = b.Nome \
-                                INNER JOIN Empregados e ON e.Nome = b.Nome \
+                                INNER JOIN Reclamacoes r ON UPPER(r.Nome) = UPPER(b.Nome) \
+                                INNER JOIN Empregados e ON UPPER(e.Nome) = UPPER(b.Nome) \
                                 GROUP BY b.Nome, b.CNPJ, b.Segmento \
-                                ORDER BY b.Segmento, b.Nome \
+                                ORDER BY b.Segmento, b.Nome; \
                                 END")
             conn.commit()
     conn.close()
